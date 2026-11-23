@@ -1,5 +1,8 @@
 name: A21s 5.10 kernel source audit and optional build
 on:
+  push:
+    branches:
+      - a21s-5.10-port
   workflow_dispatch:
     inputs:
       defconfig:
