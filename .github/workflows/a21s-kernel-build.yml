@@ -1,0 +1,44 @@
+name: A21s 5.10 kernel build diagnostic
+on:
+  workflow_dispatch:
+jobs:
+  kernel:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential bc bison flex libssl-dev libelf-dev dwarves clang lld llvm device-tree-compiler python3
+      - name: Inspect Exynos850 configs
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "Kernel version:"
+          make kernelversion
+          echo "ARM64 defconfigs matching Exynos850 / A21s:"
+          find arch/arm64/configs -type f \( -iname '*exynos*' -o -iname '*a21*' -o -iname '*s5e3830*' \) | tee /tmp/candidates.txt
+          test -s /tmp/candidates.txt || { echo "No matching config found; A21s port must be prepared first"; exit 1; }
+      - name: Build using explicit config
+        shell: bash
+        env:
+          KERNEL_DEFCONFIG: ${{ vars.KERNEL_DEFCONFIG }}
+        run: |
+          set -euo pipefail
+          if [[ -z "$KERNEL_DEFCONFIG" ]]; then
+            echo "Set repository variable KERNEL_DEFCONFIG to a verified A21s-compatible defconfig target"
+            exit 1
+          fi
+          make O=out ARCH=arm64 LLVM=1 "$KERNEL_DEFCONFIG"
+          make -j2 O=out ARCH=arm64 LLVM=1 Image dtbs
+      - name: Upload diagnostics (not flash-ready)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: a21s-kernel-diagnostics
+          path: |
+            out/.config
+            out/arch/arm64/boot/Image
+            out/arch/arm64/boot/dts/**/*.dtb
+          if-no-files-found: ignore
