@@ -1,0 +1,40 @@
+name: Compare A21s 4.19 source with 5.10
+on:
+  push:
+    branches: [a21s-5.10-port]
+  workflow_dispatch:
+jobs:
+  compare:
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Checkout 5.10 target
+        uses: actions/checkout@v4
+        with:
+          path: target
+      - name: Checkout A21s 4.19 reference
+        uses: actions/checkout@v4
+        with:
+          repository: mustvfa/android_kernel_samsung_exynos850
+          path: reference
+      - name: Create source inventory
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p report
+          for tree in reference target; do
+            (cd "$tree"; make kernelversion) > "report/$tree-version.txt"
+            find "$tree/arch/arm64/configs" -type f | sed "s|^$tree/||" | sort > "report/$tree-configs.txt"
+            find "$tree/arch/arm64/boot/dts" -type f \( -name '*.dts' -o -name '*.dtsi' \) | sed "s|^$tree/||" | sort > "report/$tree-dts.txt"
+          done
+          comm -23 report/reference-configs.txt report/target-configs.txt > report/reference-only-configs.txt
+          comm -23 report/reference-dts.txt report/target-dts.txt > report/reference-only-dts.txt
+          grep -Ei 'a21|a217|exynos850|s5e3830|atlas' report/reference-dts.txt > report/a21s-dts-candidates.txt || true
+          grep -Ei 'a21|a217|exynos850|s5e3830|atlas' report/reference-configs.txt > report/a21s-config-candidates.txt || true
+          echo "Inventory only: no cross-version drivers copied, no flashable image produced."
+      - name: Upload compatibility report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: a21s-419-to-510-compatibility-report
+          path: report/
+          if-no-files-found: warn
