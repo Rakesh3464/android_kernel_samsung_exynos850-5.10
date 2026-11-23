@@ -30,6 +30,45 @@ jobs:
           comm -23 report/reference-dts.txt report/target-dts.txt > report/reference-only-dts.txt
           grep -Ei 'a21|a217|exynos850|s5e3830|atlas' report/reference-dts.txt > report/a21s-dts-candidates.txt || true
           grep -Ei 'a21|a217|exynos850|s5e3830|atlas' report/reference-configs.txt > report/a21s-config-candidates.txt || true
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+          def config(path):
+              out={}
+              for line in Path(path).read_text(errors='replace').splitlines():
+                  m=re.match(r'^(CONFIG_[A-Za-z0-9_]+)=(.*)
+      - name: Upload compatibility report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: a21s-419-to-510-compatibility-report
+          path: report/
+          if-no-files-found: warn
+,line)
+                  if m: out[m.group(1)]=m.group(2)
+                  m=re.match(r'^# (CONFIG_[A-Za-z0-9_]+) is not set
+      - name: Upload compatibility report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: a21s-419-to-510-compatibility-report
+          path: report/
+          if-no-files-found: warn
+,line)
+                  if m: out[m.group(1)]='n'
+              return out
+          a=Path('reference/arch/arm64/configs/exynos850-a21snsxx_defconfig')
+          b=Path('target/arch/arm64/configs/exynos850-a12snsxx_defconfig')
+          if a.exists() and b.exists():
+              old,new=config(a),config(b)
+              with open('report/a21s-config-differences.tsv','w') as out:
+                  out.write('symbol\\ta21s_4.19\\ta12s_5.10\\n')
+                  for k in sorted(old.keys()|new.keys()):
+                      if old.get(k)!=new.get(k):
+                          out.write(f'{k}\\t{old.get(k,"ABSENT")}\\t{new.get(k,"ABSENT")}\\n')
+          else:
+              Path('report/config-comparison-error.txt').write_text('Missing expected defconfig files')
+          PY
           echo "Inventory only: no cross-version drivers copied, no flashable image produced."
       - name: Upload compatibility report
         if: always()
