@@ -1,8 +1,13 @@
-name: A21s 5.10 kernel build diagnostic
+name: A21s 5.10 kernel source audit and optional build
 on:
   workflow_dispatch:
+    inputs:
+      defconfig:
+        description: 'Verified A21s-compatible defconfig target (leave blank for audit only)'
+        required: false
+        type: string
 jobs:
-  kernel:
+  audit-build:
     runs-on: ubuntu-22.04
     timeout-minutes: 120
     steps:
@@ -11,34 +16,35 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y build-essential bc bison flex libssl-dev libelf-dev dwarves clang lld llvm device-tree-compiler python3
-      - name: Inspect Exynos850 configs
+      - name: Audit configs and device trees
         shell: bash
         run: |
           set -euo pipefail
-          echo "Kernel version:"
-          make kernelversion
-          echo "ARM64 defconfigs matching Exynos850 / A21s:"
-          find arch/arm64/configs -type f \( -iname '*exynos*' -o -iname '*a21*' -o -iname '*s5e3830*' \) | tee /tmp/candidates.txt
-          test -s /tmp/candidates.txt || { echo "No matching config found; A21s port must be prepared first"; exit 1; }
-      - name: Build using explicit config
+          mkdir -p diagnostics
+          make kernelversion | tee diagnostics/kernel-version.txt
+          find arch/arm64/configs -type f | sort > diagnostics/all-arm64-configs.txt
+          grep -Ei 'exynos|a21|s5e3830|a12|m12' diagnostics/all-arm64-configs.txt | tee diagnostics/candidate-configs.txt || true
+          find arch/arm64/boot/dts -type f \( -name '*.dts' -o -name '*.dtsi' \) | grep -Ei 'exynos850|s5e3830|a21|a12|m12' | sort > diagnostics/candidate-device-trees.txt || true
+          grep -RIl -m1 -E 'a21s|a217|A217' arch/arm64/boot/dts arch/arm64/configs 2>/dev/null | head -100 > diagnostics/a21s-references.txt || true
+          cat diagnostics/candidate-configs.txt
+          cat diagnostics/candidate-device-trees.txt
+      - name: Compile only when verified config supplied
+        if: ${{ inputs.defconfig != '' }}
         shell: bash
         env:
-          KERNEL_DEFCONFIG: ${{ vars.KERNEL_DEFCONFIG }}
+          DEFCONFIG: ${{ inputs.defconfig }}
         run: |
           set -euo pipefail
-          if [[ -z "$KERNEL_DEFCONFIG" ]]; then
-            echo "Set repository variable KERNEL_DEFCONFIG to a verified A21s-compatible defconfig target"
-            exit 1
-          fi
-          make O=out ARCH=arm64 LLVM=1 "$KERNEL_DEFCONFIG"
+          [[ "$DEFCONFIG" =~ ^[a-zA-Z0-9_.-]+$ ]] || exit 1
+          make O=out ARCH=arm64 LLVM=1 "$DEFCONFIG"
           make -j2 O=out ARCH=arm64 LLVM=1 Image dtbs
-      - name: Upload diagnostics (not flash-ready)
+      - name: Upload audit and non-flashable build outputs
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: a21s-kernel-diagnostics
+          name: a21s-kernel-audit
           path: |
+            diagnostics/
             out/.config
             out/arch/arm64/boot/Image
-            out/arch/arm64/boot/dts/**/*.dtb
           if-no-files-found: ignore
